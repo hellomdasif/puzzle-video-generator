@@ -16,7 +16,7 @@ from PIL import Image
 
 
 class PuzzleVideoGenerator:
-    def __init__(self, input_image, background_video, output_path, duration=None, fps=30):
+    def __init__(self, input_image, background_video, output_path, audio_file=None, duration=None, fps=30):
         """
         Initialize the puzzle video generator.
 
@@ -24,26 +24,31 @@ class PuzzleVideoGenerator:
             input_image: Path to input image (main image to overlay)
             background_video: Path to background video (9:16 format)
             output_path: Path for output video
-            duration: Video duration in seconds (default: None, uses background video duration)
+            audio_file: Path to audio file (default: None, uses background video audio)
+            duration: Video duration in seconds (default: None, uses audio/background video duration)
             fps: Frames per second (default: 30)
         """
         # Validate inputs
-        self._validate_inputs(input_image, background_video, output_path, fps)
+        self._validate_inputs(input_image, background_video, output_path, fps, audio_file)
 
         self.input_image = input_image
         self.background_video = background_video
         self.output_path = output_path
+        self.audio_file = audio_file
         self.fps = fps
 
-        # Get background video duration if not specified
+        # Get duration: priority is audio file > explicit duration > background video
         if duration is None:
-            self.duration = self._get_video_duration()
+            if audio_file:
+                self.duration = self._get_audio_duration()
+            else:
+                self.duration = self._get_video_duration()
         else:
             self.duration = duration
 
         self.total_frames = int(self.duration * fps)
 
-    def _validate_inputs(self, input_image, background_video, output_path, fps):
+    def _validate_inputs(self, input_image, background_video, output_path, fps, audio_file):
         """Validate all input parameters."""
         # Check if input image exists
         if not os.path.exists(input_image):
@@ -52,6 +57,10 @@ class PuzzleVideoGenerator:
         # Check if background video exists
         if not os.path.exists(background_video):
             raise FileNotFoundError(f"Background video not found: {background_video}")
+
+        # Check if audio file exists (if provided)
+        if audio_file and not os.path.exists(audio_file):
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
 
         # Validate image format
         valid_image_formats = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff']
@@ -82,7 +91,7 @@ class PuzzleVideoGenerator:
                             hole_color='red', piece_scale=1.0,
                             cut_margin_top=10, cut_margin_bottom=45,
                             cut_margin_left=20, cut_margin_right=20,
-                            audio_volume=100):
+                            audio_volume=100, audio_custom_volume=100):
         """
         Generate the puzzle video.
 
@@ -97,7 +106,8 @@ class PuzzleVideoGenerator:
             cut_margin_bottom: Bottom margin % to avoid cutting from (default: 45)
             cut_margin_left: Left margin % to avoid cutting from (default: 20)
             cut_margin_right: Right margin % to avoid cutting from (default: 20)
-            audio_volume: Audio volume percentage (default: 100, range: 0-200, 0=mute, 100=original, 200=2x louder)
+            audio_volume: Background video audio volume % (default: 100, range: 0-200)
+            audio_custom_volume: Custom audio file volume % (default: 100, range: 0-200)
         """
         # Validate parameters
         if cut_percentage <= 0 or cut_percentage > 50:
@@ -119,6 +129,9 @@ class PuzzleVideoGenerator:
 
         if audio_volume < 0 or audio_volume > 200:
             raise ValueError(f"audio_volume must be between 0 and 200, got: {audio_volume}")
+
+        if audio_custom_volume < 0 or audio_custom_volume > 200:
+            raise ValueError(f"audio_custom_volume must be between 0 and 200, got: {audio_custom_volume}")
 
         # Validate cut margins
         for margin_name, margin_value in [
@@ -262,7 +275,7 @@ class PuzzleVideoGenerator:
 
         # Create the video with FFmpeg
         self._create_video_ffmpeg(main_image_with_hole, cut_piece, keyframes,
-                                 img_x, img_y, audio_volume)
+                                 img_x, img_y, audio_volume, audio_custom_volume)
 
         # Cleanup
         import shutil
@@ -288,6 +301,25 @@ class PuzzleVideoGenerator:
             raise RuntimeError(f"Failed to read video duration: {e.stderr}")
         except ValueError as e:
             raise RuntimeError(f"Invalid video file or duration: {e}")
+
+    def _get_audio_duration(self):
+        """Get audio file duration using FFprobe."""
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            self.audio_file
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            duration = float(result.stdout.strip())
+            if duration <= 0:
+                raise ValueError(f"Invalid audio duration: {duration}")
+            return duration
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to read audio duration: {e.stderr}")
+        except ValueError as e:
+            raise RuntimeError(f"Invalid audio file or duration: {e}")
 
     def _get_video_dimensions(self):
         """Get background video dimensions using FFprobe."""
@@ -660,50 +692,97 @@ class PuzzleVideoGenerator:
 
         return keyframes
 
-    def _create_video_ffmpeg(self, main_image, cut_piece, keyframes, img_x, img_y, audio_volume):
+    def _create_video_ffmpeg(self, main_image, cut_piece, keyframes, img_x, img_y, audio_volume, audio_custom_volume):
         """Create the final video - overlay main image with hole and animated puzzle piece on background."""
 
         # Build overlay expressions for each frame
         x_expr = self._build_interpolation_expr(keyframes, 'x')
         y_expr = self._build_interpolation_expr(keyframes, 'y')
 
-        # FFmpeg filter complex:
-        # [0] = background video
-        # [1] = main image with hole
-        # [2] = cut piece
-        filter_complex = (
-            # Format main image to ensure alpha channel is preserved
-            f"[1:v]format=rgba[main_with_alpha];"
-            # Overlay main image on background (static position)
-            f"[0:v][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
-            # Rotate the cut piece
-            f"[2:v]format=rgba[piece];"
-            f"[piece]rotate='{self._build_interpolation_expr(keyframes, 'rotation')}*PI/180:"
-            f"c=none:ow=max(iw,ih):oh=max(iw,ih)'[rotated];"
-            # Overlay animated piece on top
-            f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out]"
-        )
+        # Calculate volume multipliers (percentage to decimal)
+        bg_volume_multiplier = audio_volume / 100.0
+        custom_volume_multiplier = audio_custom_volume / 100.0
 
-        # Calculate volume multiplier (percentage to decimal)
-        volume_multiplier = audio_volume / 100.0
+        if self.audio_file:
+            # If custom audio file is provided, mix it with background video audio
+            # FFmpeg filter complex:
+            # [0] = background video
+            # [1] = main image with hole
+            # [2] = cut piece
+            # [3] = custom audio file
+            filter_complex = (
+                # Format main image to ensure alpha channel is preserved
+                f"[1:v]format=rgba[main_with_alpha];"
+                # Overlay main image on background (static position)
+                f"[0:v][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
+                # Rotate the cut piece
+                f"[2:v]format=rgba[piece];"
+                f"[piece]rotate='{self._build_interpolation_expr(keyframes, 'rotation')}*PI/180:"
+                f"c=none:ow=max(iw,ih):oh=max(iw,ih)'[rotated];"
+                # Overlay animated piece on top
+                f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out];"
+                # Apply volume to background video audio
+                f"[0:a]volume={bg_volume_multiplier}[bg_audio];"
+                # Apply volume to custom audio file
+                f"[3:a]volume={custom_volume_multiplier}[custom_audio];"
+                # Mix both audio sources with separate volume controls
+                f"[bg_audio][custom_audio]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+            )
 
-        cmd = [
-            'ffmpeg', '-y',
-            '-i', self.background_video,  # Input 0: background video
-            '-loop', '1', '-t', str(self.duration), '-i', main_image,  # Input 1: main image with hole
-            '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
-            '-filter_complex', filter_complex,
-            '-map', '[out]',
-            '-map', '0:a?',  # Map audio from background video if present (0:a? means optional)
-            '-r', str(self.fps),
-            '-pix_fmt', 'yuv420p',
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-af', f'volume={volume_multiplier}',  # Apply volume filter
-            '-c:a', 'aac',  # Encode audio to AAC
-            '-b:a', '192k',  # Audio bitrate
-            self.output_path
-        ]
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', self.background_video,  # Input 0: background video
+                '-loop', '1', '-t', str(self.duration), '-i', main_image,  # Input 1: main image with hole
+                '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
+                '-i', self.audio_file,  # Input 3: custom audio file
+                '-filter_complex', filter_complex,
+                '-map', '[out]',  # Map video output
+                '-map', '[aout]',  # Map mixed audio output
+                '-r', str(self.fps),
+                '-pix_fmt', 'yuv420p',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-c:a', 'aac',  # Encode audio to AAC
+                '-b:a', '192k',  # Audio bitrate
+                '-shortest',  # End when shortest stream ends
+                self.output_path
+            ]
+        else:
+            # No custom audio file, use only background video audio
+            # FFmpeg filter complex:
+            # [0] = background video
+            # [1] = main image with hole
+            # [2] = cut piece
+            filter_complex = (
+                # Format main image to ensure alpha channel is preserved
+                f"[1:v]format=rgba[main_with_alpha];"
+                # Overlay main image on background (static position)
+                f"[0:v][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
+                # Rotate the cut piece
+                f"[2:v]format=rgba[piece];"
+                f"[piece]rotate='{self._build_interpolation_expr(keyframes, 'rotation')}*PI/180:"
+                f"c=none:ow=max(iw,ih):oh=max(iw,ih)'[rotated];"
+                # Overlay animated piece on top
+                f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out]"
+            )
+
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', self.background_video,  # Input 0: background video
+                '-loop', '1', '-t', str(self.duration), '-i', main_image,  # Input 1: main image with hole
+                '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
+                '-filter_complex', filter_complex,
+                '-map', '[out]',
+                '-map', '0:a?',  # Map audio from background video if present (0:a? means optional)
+                '-r', str(self.fps),
+                '-pix_fmt', 'yuv420p',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-af', f'volume={bg_volume_multiplier}',  # Apply volume filter
+                '-c:a', 'aac',  # Encode audio to AAC
+                '-b:a', '192k',  # Audio bitrate
+                self.output_path
+            ]
 
         print("🎨 Rendering video...")
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -748,16 +827,16 @@ Examples:
   # Minimal usage with defaults
   python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4
 
-  # Custom settings
+  # Custom settings with audio file
   python3 puzzle_video_generator.py -i photo.png -b bg.mp4 -o result.mp4 \\
     --cut-percentage 30 --cut-shape circle --hole-color blue --num-alignments 5 \\
-    --audio-volume 80
+    --audio-file music.mp3 --audio-volume 50 --audio-custom-volume 100
 
   # Advanced with all options
   python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4 \\
     --cut-percentage 25 --cut-shape star --piece-scale 1.2 \\
     --hole-color "#FF00FF" --num-alignments 4 --movement-style rotating \\
-    --fps 60 --duration 20 --audio-volume 50 \\
+    --fps 60 --audio-file audio.mp3 --audio-volume 10 --audio-custom-volume 100 \\
     --margin-top 15 --margin-bottom 45 --margin-left 20 --margin-right 20
         """
     )
@@ -803,8 +882,12 @@ Examples:
 
     # Audio settings
     audio_group = parser.add_argument_group('audio settings')
+    audio_group.add_argument('--audio-file', type=str, default=None,
+                             help='Path to custom audio file (optional, will be mixed with background video audio)')
     audio_group.add_argument('--audio-volume', type=int, default=100,
-                             help='Audio volume percentage (default: 100, range: 0-200, 0=mute, 100=original, 200=2x louder)')
+                             help='Background video audio volume %% (default: 100, range: 0-200)')
+    audio_group.add_argument('--audio-custom-volume', type=int, default=100,
+                             help='Custom audio file volume %% (default: 100, range: 0-200)')
 
     # Cut margins
     margin_group = parser.add_argument_group('cut margins (percentage of image to avoid)')
@@ -835,6 +918,7 @@ def main():
             input_image=args.input_image,
             background_video=args.background_video,
             output_path=args.output,
+            audio_file=args.audio_file,
             duration=args.duration,
             fps=args.fps
         )
@@ -851,7 +935,8 @@ def main():
             cut_margin_bottom=args.margin_bottom,
             cut_margin_left=args.margin_left,
             cut_margin_right=args.margin_right,
-            audio_volume=args.audio_volume
+            audio_volume=args.audio_volume,
+            audio_custom_volume=args.audio_custom_volume
         )
 
         print("\n✨ Done! Your puzzle video is ready!")
