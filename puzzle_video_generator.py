@@ -202,16 +202,22 @@ class PuzzleVideoGenerator:
         if img_width < 100 or img_height < 100:
             raise ValueError(f"Image too small: {img_width}x{img_height}. Minimum: 100x100")
 
-        # Scale image based on image_coverage percentage
-        # Calculate target size based on coverage percentage
+        # Scale image based on image_coverage percentage relative to video width (for 9:16 videos)
+        # Calculate target size based on coverage percentage of video width
         coverage_decimal = image_coverage / 100.0
-        max_img_width = int(bg_width * coverage_decimal)
-        max_img_height = int(bg_height * coverage_decimal)
+        target_width = int(bg_width * coverage_decimal)
 
         # Calculate scaled dimensions maintaining aspect ratio
-        scale = min(max_img_width / img_width, max_img_height / img_height)
+        # Scale based on width to ensure consistent sizing across all images
+        scale = target_width / img_width
         scaled_img_width = int(img_width * scale)
         scaled_img_height = int(img_height * scale)
+
+        # Ensure image doesn't exceed video height
+        if scaled_img_height > bg_height * 0.95:
+            scale = (bg_height * 0.95) / img_height
+            scaled_img_width = int(img_width * scale)
+            scaled_img_height = int(img_height * scale)
 
         # Ensure scaled dimensions are reasonable
         if scaled_img_width < 200 or scaled_img_height < 200:
