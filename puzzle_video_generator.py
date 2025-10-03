@@ -97,7 +97,7 @@ class PuzzleVideoGenerator:
                             cut_margin_top=10, cut_margin_bottom=45,
                             cut_margin_left=20, cut_margin_right=20,
                             audio_volume=100, audio_custom_volume=100,
-                            alignment_hold_time=0.5):
+                            alignment_hold_time=0.5, image_coverage=80):
         """
         Generate the puzzle video.
 
@@ -115,6 +115,7 @@ class PuzzleVideoGenerator:
             audio_volume: Background video audio volume % (default: 100, range: 0-200)
             audio_custom_volume: Custom audio file volume % (default: 100, range: 0-200)
             alignment_hold_time: Time in seconds to hold piece at aligned position (default: 0.5, range: 0-3)
+            image_coverage: Percentage of video that image should cover (default: 80, range: 50-95)
         """
         # Validate parameters
         if cut_percentage <= 0 or cut_percentage > 50:
@@ -146,6 +147,9 @@ class PuzzleVideoGenerator:
 
         if alignment_hold_time < 0 or alignment_hold_time > 3:
             raise ValueError(f"alignment_hold_time must be between 0 and 3, got: {alignment_hold_time}")
+
+        if image_coverage < 50 or image_coverage > 95:
+            raise ValueError(f"image_coverage must be between 50 and 95, got: {image_coverage}")
 
         # Validate cut margins
         for margin_name, margin_value in [
@@ -184,6 +188,7 @@ class PuzzleVideoGenerator:
         print(f"   Movement style: {movement_style}")
         print(f"   Hole color: {hole_color}")
         print(f"   Piece scale: {piece_scale}x")
+        print(f"   Image coverage: {image_coverage}%")
 
         # Get background video dimensions
         bg_width, bg_height = self._get_video_dimensions()
@@ -197,10 +202,11 @@ class PuzzleVideoGenerator:
         if img_width < 100 or img_height < 100:
             raise ValueError(f"Image too small: {img_width}x{img_height}. Minimum: 100x100")
 
-        # Scale image to fit with 10% margin on all sides
-        margin_percent = 0.10
-        max_img_width = int(bg_width * (1 - 2 * margin_percent))
-        max_img_height = int(bg_height * (1 - 2 * margin_percent))
+        # Scale image based on image_coverage percentage
+        # Calculate target size based on coverage percentage
+        coverage_decimal = image_coverage / 100.0
+        max_img_width = int(bg_width * coverage_decimal)
+        max_img_height = int(bg_height * coverage_decimal)
 
         # Calculate scaled dimensions maintaining aspect ratio
         scale = min(max_img_width / img_width, max_img_height / img_height)
@@ -972,6 +978,8 @@ Examples:
     visual_group = parser.add_argument_group('visual settings')
     visual_group.add_argument('--hole-color', type=str, default='red',
                               help='Color of hole (default: red, options: red/black/blue/green/yellow/purple/orange/pink/cyan/random or hex like #FF0000)')
+    visual_group.add_argument('--image-coverage', type=int, default=80,
+                              help='Percentage of video that image should cover (default: 80, range: 50-95)')
 
     # Audio settings
     audio_group = parser.add_argument_group('audio settings')
@@ -1030,7 +1038,8 @@ def main():
             cut_margin_right=args.margin_right,
             audio_volume=args.audio_volume,
             audio_custom_volume=args.audio_custom_volume,
-            alignment_hold_time=args.alignment_hold_time
+            alignment_hold_time=args.alignment_hold_time,
+            image_coverage=args.image_coverage
         )
 
         print("\n✨ Done! Your puzzle video is ready!")
