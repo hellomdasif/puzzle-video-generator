@@ -96,7 +96,8 @@ class PuzzleVideoGenerator:
                             hole_color='red', piece_scale=1.0,
                             cut_margin_top=10, cut_margin_bottom=45,
                             cut_margin_left=20, cut_margin_right=20,
-                            audio_volume=100, audio_custom_volume=100):
+                            audio_volume=100, audio_custom_volume=100,
+                            alignment_hold_time=0.5):
         """
         Generate the puzzle video.
 
@@ -113,6 +114,7 @@ class PuzzleVideoGenerator:
             cut_margin_right: Right margin % to avoid cutting from (default: 20)
             audio_volume: Background video audio volume % (default: 100, range: 0-200)
             audio_custom_volume: Custom audio file volume % (default: 100, range: 0-200)
+            alignment_hold_time: Time in seconds to hold piece at aligned position (default: 0.5, range: 0-3)
         """
         # Validate parameters
         if cut_percentage <= 0 or cut_percentage > 50:
@@ -141,6 +143,9 @@ class PuzzleVideoGenerator:
 
         if audio_custom_volume < 0 or audio_custom_volume > 200:
             raise ValueError(f"audio_custom_volume must be between 0 and 200, got: {audio_custom_volume}")
+
+        if alignment_hold_time < 0 or alignment_hold_time > 3:
+            raise ValueError(f"alignment_hold_time must be between 0 and 3, got: {alignment_hold_time}")
 
         # Validate cut margins
         for margin_name, margin_value in [
@@ -280,7 +285,7 @@ class PuzzleVideoGenerator:
         # Generate movement keyframes
         keyframes = self._generate_movement_keyframes(
             bg_width, bg_height, cut_size, align_x, align_y,
-            alignment_frames, movement_style
+            alignment_frames, movement_style, alignment_hold_time
         )
 
         # Create the video with FFmpeg
@@ -524,19 +529,19 @@ class PuzzleVideoGenerator:
 
     def _generate_movement_keyframes(self, width, height, size,
                                     origin_x, origin_y, alignment_frames,
-                                    movement_style):
+                                    movement_style, alignment_hold_time):
         """Generate keyframes based on movement style."""
         if movement_style == 'chaotic':
-            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames)
+            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time)
         elif movement_style == 'rotating':
-            return self._generate_rotating_movement(width, height, size, origin_x, origin_y, alignment_frames)
+            return self._generate_rotating_movement(width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time)
         elif movement_style == 'zigzag':
-            return self._generate_zigzag_movement(width, height, size, origin_x, origin_y, alignment_frames)
+            return self._generate_zigzag_movement(width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time)
         else:
             # Default to chaotic
-            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames)
+            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time)
 
-    def _generate_chaotic_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
+    def _generate_chaotic_movement(self, width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time):
         """Generate keyframes for linear vertical movement with alignments."""
         keyframes = []
         num_alignments = len(alignment_frames)
@@ -616,8 +621,20 @@ class PuzzleVideoGenerator:
             # Alignment (if this segment has one)
             if i < num_alignments:
                 alignment_frame = alignment_frames[i]
+                # Hold period: piece stays at alignment
+                hold_frames = int(self.fps * alignment_hold_time)
+
+                # Keyframe just before alignment
                 keyframes.append({
                     'frame': alignment_frame,
+                    'x': origin_x,
+                    'y': origin_y,
+                    'rotation': 0
+                })
+
+                # Keyframe at end of hold period (piece still aligned)
+                keyframes.append({
+                    'frame': alignment_frame + hold_frames,
                     'x': origin_x,
                     'y': origin_y,
                     'rotation': 0
@@ -643,7 +660,7 @@ class PuzzleVideoGenerator:
 
         return keyframes
 
-    def _generate_rotating_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
+    def _generate_rotating_movement(self, width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time):
         """Generate movement with rotation."""
         keyframes = []
         num_alignments = len(alignment_frames)
@@ -662,8 +679,18 @@ class PuzzleVideoGenerator:
 
             # Alignment (no rotation when aligned)
             alignment_frame = alignment_frames[i]
+            hold_frames = int(self.fps * alignment_hold_time)
+
             keyframes.append({
                 'frame': alignment_frame,
+                'x': origin_x,
+                'y': origin_y,
+                'rotation': 0
+            })
+
+            # Hold at alignment
+            keyframes.append({
+                'frame': alignment_frame + hold_frames,
                 'x': origin_x,
                 'y': origin_y,
                 'rotation': 0
@@ -683,7 +710,7 @@ class PuzzleVideoGenerator:
 
         return keyframes
 
-    def _generate_zigzag_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
+    def _generate_zigzag_movement(self, width, height, size, origin_x, origin_y, alignment_frames, alignment_hold_time):
         """Generate zigzag diagonal movement."""
         keyframes = []
         num_alignments = len(alignment_frames)
@@ -710,8 +737,18 @@ class PuzzleVideoGenerator:
 
             # Alignment
             alignment_frame = alignment_frames[i]
+            hold_frames = int(self.fps * alignment_hold_time)
+
             keyframes.append({
                 'frame': alignment_frame,
+                'x': origin_x,
+                'y': origin_y,
+                'rotation': 0
+            })
+
+            # Hold at alignment
+            keyframes.append({
+                'frame': alignment_frame + hold_frames,
                 'x': origin_x,
                 'y': origin_y,
                 'rotation': 0
@@ -928,6 +965,8 @@ Examples:
     anim_group.add_argument('--movement-style', type=str, default='chaotic',
                             choices=['chaotic', 'rotating', 'zigzag', 'random'],
                             help='Movement pattern (default: chaotic)')
+    anim_group.add_argument('--alignment-hold-time', type=float, default=0.5,
+                            help='Time in seconds to hold piece at aligned position (default: 0.5, range: 0-3)')
 
     # Visual settings
     visual_group = parser.add_argument_group('visual settings')
@@ -990,7 +1029,8 @@ def main():
             cut_margin_left=args.margin_left,
             cut_margin_right=args.margin_right,
             audio_volume=args.audio_volume,
-            audio_custom_volume=args.audio_custom_volume
+            audio_custom_volume=args.audio_custom_volume,
+            alignment_hold_time=args.alignment_hold_time
         )
 
         print("\n✨ Done! Your puzzle video is ready!")
