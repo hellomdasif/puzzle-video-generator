@@ -81,7 +81,8 @@ class PuzzleVideoGenerator:
                             cut_shape='random', movement_style='chaotic',
                             hole_color='red', piece_scale=1.0,
                             cut_margin_top=10, cut_margin_bottom=45,
-                            cut_margin_left=20, cut_margin_right=20):
+                            cut_margin_left=20, cut_margin_right=20,
+                            audio_volume=100):
         """
         Generate the puzzle video.
 
@@ -93,9 +94,10 @@ class PuzzleVideoGenerator:
             hole_color: Color of the hole ('red', 'black', 'blue', 'green', 'yellow', 'random', or hex like '#FF0000')
             piece_scale: Scale multiplier for cut piece size (default: 1.0, range: 0.5-2.0)
             cut_margin_top: Top margin % to avoid cutting from (default: 10)
-            cut_margin_bottom: Bottom margin % to avoid cutting from (default: 10)
-            cut_margin_left: Left margin % to avoid cutting from (default: 10)
-            cut_margin_right: Right margin % to avoid cutting from (default: 10)
+            cut_margin_bottom: Bottom margin % to avoid cutting from (default: 45)
+            cut_margin_left: Left margin % to avoid cutting from (default: 20)
+            cut_margin_right: Right margin % to avoid cutting from (default: 20)
+            audio_volume: Audio volume percentage (default: 100, range: 0-200, 0=mute, 100=original, 200=2x louder)
         """
         # Validate parameters
         if cut_percentage <= 0 or cut_percentage > 50:
@@ -114,6 +116,9 @@ class PuzzleVideoGenerator:
 
         if piece_scale < 0.5 or piece_scale > 2.0:
             raise ValueError(f"piece_scale must be between 0.5 and 2.0, got: {piece_scale}")
+
+        if audio_volume < 0 or audio_volume > 200:
+            raise ValueError(f"audio_volume must be between 0 and 200, got: {audio_volume}")
 
         # Validate cut margins
         for margin_name, margin_value in [
@@ -257,7 +262,7 @@ class PuzzleVideoGenerator:
 
         # Create the video with FFmpeg
         self._create_video_ffmpeg(main_image_with_hole, cut_piece, keyframes,
-                                 img_x, img_y)
+                                 img_x, img_y, audio_volume)
 
         # Cleanup
         import shutil
@@ -655,7 +660,7 @@ class PuzzleVideoGenerator:
 
         return keyframes
 
-    def _create_video_ffmpeg(self, main_image, cut_piece, keyframes, img_x, img_y):
+    def _create_video_ffmpeg(self, main_image, cut_piece, keyframes, img_x, img_y, audio_volume):
         """Create the final video - overlay main image with hole and animated puzzle piece on background."""
 
         # Build overlay expressions for each frame
@@ -679,6 +684,9 @@ class PuzzleVideoGenerator:
             f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out]"
         )
 
+        # Calculate volume multiplier (percentage to decimal)
+        volume_multiplier = audio_volume / 100.0
+
         cmd = [
             'ffmpeg', '-y',
             '-i', self.background_video,  # Input 0: background video
@@ -686,11 +694,14 @@ class PuzzleVideoGenerator:
             '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
             '-filter_complex', filter_complex,
             '-map', '[out]',
+            '-map', '0:a?',  # Map audio from background video if present (0:a? means optional)
             '-r', str(self.fps),
             '-pix_fmt', 'yuv420p',
             '-c:v', 'libx264',
             '-preset', 'fast',
-            '-c:a', 'copy',  # Copy audio from background video if present
+            '-af', f'volume={volume_multiplier}',  # Apply volume filter
+            '-c:a', 'aac',  # Encode audio to AAC
+            '-b:a', '192k',  # Audio bitrate
             self.output_path
         ]
 
@@ -739,13 +750,14 @@ Examples:
 
   # Custom settings
   python3 puzzle_video_generator.py -i photo.png -b bg.mp4 -o result.mp4 \\
-    --cut-percentage 30 --cut-shape circle --hole-color blue --num-alignments 5
+    --cut-percentage 30 --cut-shape circle --hole-color blue --num-alignments 5 \\
+    --audio-volume 80
 
   # Advanced with all options
   python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4 \\
     --cut-percentage 25 --cut-shape star --piece-scale 1.2 \\
     --hole-color "#FF00FF" --num-alignments 4 --movement-style rotating \\
-    --fps 60 --duration 20 \\
+    --fps 60 --duration 20 --audio-volume 50 \\
     --margin-top 15 --margin-bottom 45 --margin-left 20 --margin-right 20
         """
     )
@@ -788,6 +800,11 @@ Examples:
     visual_group = parser.add_argument_group('visual settings')
     visual_group.add_argument('--hole-color', type=str, default='red',
                               help='Color of hole (default: red, options: red/black/blue/green/yellow/purple/orange/pink/cyan/random or hex like #FF0000)')
+
+    # Audio settings
+    audio_group = parser.add_argument_group('audio settings')
+    audio_group.add_argument('--audio-volume', type=int, default=100,
+                             help='Audio volume percentage (default: 100, range: 0-200, 0=mute, 100=original, 200=2x louder)')
 
     # Cut margins
     margin_group = parser.add_argument_group('cut margins (percentage of image to avoid)')
@@ -833,7 +850,8 @@ def main():
             cut_margin_top=args.margin_top,
             cut_margin_bottom=args.margin_bottom,
             cut_margin_left=args.margin_left,
-            cut_margin_right=args.margin_right
+            cut_margin_right=args.margin_right,
+            audio_volume=args.audio_volume
         )
 
         print("\n✨ Done! Your puzzle video is ready!")
