@@ -530,13 +530,61 @@ class PuzzleVideoGenerator:
         """Generate keyframes for linear vertical movement with alignments."""
         keyframes = []
         num_alignments = len(alignment_frames)
-        frames_per_sweep = self.total_frames // num_alignments if num_alignments > 0 else self.total_frames
-        current_frame = 0
 
-        for i in range(num_alignments):
+        if num_alignments == 0:
+            # No alignments - continuous vertical sweeps
+            num_sweeps = 3  # At least 3 sweeps for continuous movement
+            frames_per_sweep = self.total_frames // num_sweeps
+
+            for i in range(num_sweeps):
+                going_down = i % 2 == 0
+                sweep_x = random.randint(0, width - size)
+
+                start_frame = i * frames_per_sweep
+                end_frame = (i + 1) * frames_per_sweep if i < num_sweeps - 1 else self.total_frames - 1
+
+                if going_down:
+                    start_y = 0
+                    end_y = height - size
+                else:
+                    start_y = height - size
+                    end_y = 0
+
+                keyframes.append({
+                    'frame': start_frame,
+                    'x': sweep_x,
+                    'y': start_y,
+                    'rotation': 0
+                })
+
+                keyframes.append({
+                    'frame': end_frame,
+                    'x': sweep_x,
+                    'y': end_y,
+                    'rotation': 0
+                })
+
+            return keyframes
+
+        # With alignments - ensure continuous movement
+        # Calculate frames per segment (between alignments)
+        total_segments = num_alignments + 1
+        frames_per_segment = self.total_frames // total_segments
+
+        for i in range(num_alignments + 1):
             going_down = i % 2 == 0
             sweep_x = random.randint(0, width - size)
 
+            # Start frame of this segment
+            start_frame = i * frames_per_segment
+
+            # End frame of this segment
+            if i == num_alignments:
+                # Last segment - go to the very end
+                end_frame = self.total_frames - 1
+            else:
+                end_frame = (i + 1) * frames_per_segment - 1
+
             if going_down:
                 start_y = 0
                 end_y = height - size
@@ -544,51 +592,27 @@ class PuzzleVideoGenerator:
                 start_y = height - size
                 end_y = 0
 
+            # Start of segment
             keyframes.append({
-                'frame': current_frame,
+                'frame': start_frame,
                 'x': sweep_x,
                 'y': start_y,
                 'rotation': 0
             })
 
-            alignment_frame = alignment_frames[i]
-            keyframes.append({
-                'frame': alignment_frame,
-                'x': origin_x,
-                'y': origin_y,
-                'rotation': 0
-            })
+            # Alignment (if this segment has one)
+            if i < num_alignments:
+                alignment_frame = alignment_frames[i]
+                keyframes.append({
+                    'frame': alignment_frame,
+                    'x': origin_x,
+                    'y': origin_y,
+                    'rotation': 0
+                })
 
-            end_frame = min(current_frame + frames_per_sweep, self.total_frames - 1)
+            # End of segment (moving to end position)
             keyframes.append({
                 'frame': end_frame,
-                'x': sweep_x,
-                'y': end_y,
-                'rotation': 0
-            })
-
-            current_frame = end_frame + 1
-
-        if current_frame < self.total_frames:
-            going_down = num_alignments % 2 == 0
-            sweep_x = random.randint(0, width - size)
-
-            if going_down:
-                start_y = 0
-                end_y = height - size
-            else:
-                start_y = height - size
-                end_y = 0
-
-            keyframes.append({
-                'frame': current_frame,
-                'x': sweep_x,
-                'y': start_y,
-                'rotation': 0
-            })
-
-            keyframes.append({
-                'frame': self.total_frames - 1,
                 'x': sweep_x,
                 'y': end_y,
                 'rotation': 0
