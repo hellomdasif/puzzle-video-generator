@@ -634,9 +634,19 @@ class PuzzleVideoGenerator:
             if i < num_alignments:
                 alignment_frame = alignment_frames[i]
                 # Hold period: piece stays at alignment
-                hold_frames = int(self.fps * alignment_hold_time)
+                hold_frames = max(int(self.fps * alignment_hold_time), 1)  # At least 1 frame
 
-                # Keyframe just before alignment
+                # Add approach keyframe 5 frames before alignment to slow down
+                approach_frames = 5
+                if alignment_frame > approach_frames:
+                    keyframes.append({
+                        'frame': alignment_frame - approach_frames,
+                        'x': origin_x,
+                        'y': origin_y,
+                        'rotation': 0
+                    })
+
+                # Keyframe at alignment start
                 keyframes.append({
                     'frame': alignment_frame,
                     'x': origin_x,
@@ -691,7 +701,17 @@ class PuzzleVideoGenerator:
 
             # Alignment (no rotation when aligned)
             alignment_frame = alignment_frames[i]
-            hold_frames = int(self.fps * alignment_hold_time)
+            hold_frames = max(int(self.fps * alignment_hold_time), 1)
+
+            # Add approach keyframe to slow down before alignment
+            approach_frames = 5
+            if alignment_frame > approach_frames:
+                keyframes.append({
+                    'frame': alignment_frame - approach_frames,
+                    'x': origin_x,
+                    'y': origin_y,
+                    'rotation': 0
+                })
 
             keyframes.append({
                 'frame': alignment_frame,
@@ -749,7 +769,17 @@ class PuzzleVideoGenerator:
 
             # Alignment
             alignment_frame = alignment_frames[i]
-            hold_frames = int(self.fps * alignment_hold_time)
+            hold_frames = max(int(self.fps * alignment_hold_time), 1)
+
+            # Add approach keyframe to slow down before alignment
+            approach_frames = 5
+            if alignment_frame > approach_frames:
+                keyframes.append({
+                    'frame': alignment_frame - approach_frames,
+                    'x': origin_x,
+                    'y': origin_y,
+                    'rotation': 0
+                })
 
             keyframes.append({
                 'frame': alignment_frame,
