@@ -808,11 +808,11 @@ class PuzzleVideoGenerator:
                 # Overlay animated piece on top
                 f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out];"
                 # Trim and apply volume to background video audio
-                f"[0:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={bg_volume_multiplier}[bg_audio];"
+                f"[0:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={bg_volume_multiplier},apad=whole_dur={self.duration}[bg_audio];"
                 # Trim and apply volume to custom audio file
-                f"[3:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={custom_volume_multiplier}[custom_audio];"
-                # Mix both audio sources with exact duration
-                f"[bg_audio][custom_audio]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                f"[3:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={custom_volume_multiplier},apad=whole_dur={self.duration}[custom_audio];"
+                # Mix both audio sources - use longest duration to prevent cutoff
+                f"[bg_audio][custom_audio]amix=inputs=2:duration=longest:dropout_transition=0,atrim=duration={self.duration}[aout]"
             )
 
             cmd = [
@@ -867,7 +867,7 @@ class PuzzleVideoGenerator:
                 '-pix_fmt', 'yuv420p',
                 '-c:v', 'libx264',
                 '-preset', 'fast',
-                '-af', f'atrim=duration={self.duration},volume={bg_volume_multiplier}',  # Trim and apply volume filter
+                '-af', f'atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={bg_volume_multiplier},apad=whole_dur={self.duration}',  # Trim, apply volume, and pad
                 '-c:a', 'aac',  # Encode audio to AAC
                 '-b:a', '192k',  # Audio bitrate
                 self.output_path
