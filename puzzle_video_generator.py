@@ -9,6 +9,7 @@ import subprocess
 import random
 import math
 import os
+import argparse
 from pathlib import Path
 from rembg import remove
 from PIL import Image
@@ -79,8 +80,8 @@ class PuzzleVideoGenerator:
     def generate_puzzle_video(self, cut_percentage=20, num_alignments=None,
                             cut_shape='random', movement_style='chaotic',
                             hole_color='red', piece_scale=1.0,
-                            cut_margin_top=10, cut_margin_bottom=10,
-                            cut_margin_left=10, cut_margin_right=10):
+                            cut_margin_top=10, cut_margin_bottom=45,
+                            cut_margin_left=20, cut_margin_right=20):
         """
         Generate the puzzle video.
 
@@ -106,6 +107,10 @@ class PuzzleVideoGenerator:
         valid_shapes = ['circle', 'square', 'triangle', 'star', 'random']
         if cut_shape not in valid_shapes:
             raise ValueError(f"cut_shape must be one of {valid_shapes}, got: {cut_shape}")
+
+        valid_movement_styles = ['chaotic', 'rotating', 'zigzag']
+        if movement_style not in valid_movement_styles:
+            raise ValueError(f"movement_style must be one of {valid_movement_styles}, got: {movement_style}")
 
         if piece_scale < 0.5 or piece_scale > 2.0:
             raise ValueError(f"piece_scale must be between 0.5 and 2.0, got: {piece_scale}")
@@ -473,34 +478,35 @@ class PuzzleVideoGenerator:
     def _generate_movement_keyframes(self, width, height, size,
                                     origin_x, origin_y, alignment_frames,
                                     movement_style):
+        """Generate keyframes based on movement style."""
+        if movement_style == 'chaotic':
+            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames)
+        elif movement_style == 'rotating':
+            return self._generate_rotating_movement(width, height, size, origin_x, origin_y, alignment_frames)
+        elif movement_style == 'zigzag':
+            return self._generate_zigzag_movement(width, height, size, origin_x, origin_y, alignment_frames)
+        else:
+            # Default to chaotic
+            return self._generate_chaotic_movement(width, height, size, origin_x, origin_y, alignment_frames)
+
+    def _generate_chaotic_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
         """Generate keyframes for linear vertical movement with alignments."""
         keyframes = []
-
-        # Divide video into sweeps based on number of alignments
         num_alignments = len(alignment_frames)
-
-        # Each sweep goes from top to bottom or bottom to top
-        # Calculate frames per sweep
         frames_per_sweep = self.total_frames // num_alignments if num_alignments > 0 else self.total_frames
-
         current_frame = 0
 
         for i in range(num_alignments):
-            # Determine direction: alternate between top-to-bottom and bottom-to-top
             going_down = i % 2 == 0
-
-            # Random X position for each sweep - perfectly straight vertical line at this X
             sweep_x = random.randint(0, width - size)
 
-            # Start and end y positions - reduced range for slower visible movement
             if going_down:
-                start_y = 0  # Start at top
-                end_y = height - size   # End at bottom
+                start_y = 0
+                end_y = height - size
             else:
-                start_y = height - size # Start at bottom
-                end_y = 0    # End at top
+                start_y = height - size
+                end_y = 0
 
-            # Start of sweep
             keyframes.append({
                 'frame': current_frame,
                 'x': sweep_x,
@@ -508,11 +514,7 @@ class PuzzleVideoGenerator:
                 'rotation': 0
             })
 
-            # Alignment point during sweep - piece aligns when Y matches the hole
             alignment_frame = alignment_frames[i]
-
-            # Align to origin position (the hole in the main image)
-            # X stays the same (sweep_x = origin_x), only Y aligns
             keyframes.append({
                 'frame': alignment_frame,
                 'x': origin_x,
@@ -520,7 +522,6 @@ class PuzzleVideoGenerator:
                 'rotation': 0
             })
 
-            # End of sweep
             end_frame = min(current_frame + frames_per_sweep, self.total_frames - 1)
             keyframes.append({
                 'frame': end_frame,
@@ -531,10 +532,9 @@ class PuzzleVideoGenerator:
 
             current_frame = end_frame + 1
 
-        # If there are remaining frames, add a final sweep
         if current_frame < self.total_frames:
             going_down = num_alignments % 2 == 0
-            sweep_x = random.randint(0, width - size)  # Random X position for straight line
+            sweep_x = random.randint(0, width - size)
 
             if going_down:
                 start_y = 0
@@ -556,6 +556,102 @@ class PuzzleVideoGenerator:
                 'y': end_y,
                 'rotation': 0
             })
+
+        return keyframes
+
+    def _generate_rotating_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
+        """Generate movement with rotation."""
+        keyframes = []
+        num_alignments = len(alignment_frames)
+        frames_per_segment = self.total_frames // (num_alignments + 1) if num_alignments > 0 else self.total_frames
+        current_frame = 0
+        current_rotation = 0
+
+        for i in range(num_alignments):
+            # Random position with rotation
+            keyframes.append({
+                'frame': current_frame,
+                'x': random.randint(0, width - size),
+                'y': random.randint(0, height - size),
+                'rotation': current_rotation
+            })
+
+            # Alignment (no rotation when aligned)
+            alignment_frame = alignment_frames[i]
+            keyframes.append({
+                'frame': alignment_frame,
+                'x': origin_x,
+                'y': origin_y,
+                'rotation': 0
+            })
+
+            # Increase rotation for next segment
+            current_rotation += random.randint(90, 270)
+            current_frame = min(current_frame + frames_per_segment, self.total_frames - 1)
+
+        # Final position with rotation
+        keyframes.append({
+            'frame': self.total_frames - 1,
+            'x': random.randint(0, width - size),
+            'y': random.randint(0, height - size),
+            'rotation': current_rotation + random.randint(90, 180)
+        })
+
+        return keyframes
+
+    def _generate_zigzag_movement(self, width, height, size, origin_x, origin_y, alignment_frames):
+        """Generate zigzag diagonal movement."""
+        keyframes = []
+        num_alignments = len(alignment_frames)
+        frames_per_segment = self.total_frames // (num_alignments + 1) if num_alignments > 0 else self.total_frames
+        current_frame = 0
+
+        for i in range(num_alignments):
+            # Zigzag pattern - alternate corners
+            if i % 4 == 0:
+                x, y = 0, 0  # Top-left
+            elif i % 4 == 1:
+                x, y = width - size, 0  # Top-right
+            elif i % 4 == 2:
+                x, y = width - size, height - size  # Bottom-right
+            else:
+                x, y = 0, height - size  # Bottom-left
+
+            keyframes.append({
+                'frame': current_frame,
+                'x': x,
+                'y': y,
+                'rotation': 0
+            })
+
+            # Alignment
+            alignment_frame = alignment_frames[i]
+            keyframes.append({
+                'frame': alignment_frame,
+                'x': origin_x,
+                'y': origin_y,
+                'rotation': 0
+            })
+
+            current_frame = min(current_frame + frames_per_segment, self.total_frames - 1)
+
+        # Final corner
+        final_corner = num_alignments % 4
+        if final_corner == 0:
+            x, y = 0, 0
+        elif final_corner == 1:
+            x, y = width - size, 0
+        elif final_corner == 2:
+            x, y = width - size, height - size
+        else:
+            x, y = 0, height - size
+
+        keyframes.append({
+            'frame': self.total_frames - 1,
+            'x': x,
+            'y': y,
+            'rotation': 0
+        })
 
         return keyframes
 
@@ -631,68 +727,138 @@ class PuzzleVideoGenerator:
         return expr
 
 
-def main():
-    """Example usage of the PuzzleVideoGenerator."""
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Puzzle Video Generator - Create challenge videos with animated puzzle pieces',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Minimal usage with defaults
+  python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4
 
-    # Configuration
-    INPUT_IMAGE = "/Users/asif/Documents/puzzle/b8fe2df7f5162b4231935412eb26bb03 (1).jpg"
-    BACKGROUND_VIDEO = "/Users/asif/Documents/puzzle/input.mp4"
-    OUTPUT_DIR = "/Users/asif/Documents/puzzle/output"
-    OUTPUT_VIDEO = os.path.join(OUTPUT_DIR, "puzzle_challenge.mp4")
+  # Custom settings
+  python3 puzzle_video_generator.py -i photo.png -b bg.mp4 -o result.mp4 \\
+    --cut-percentage 30 --cut-shape circle --hole-color blue --num-alignments 5
+
+  # Advanced with all options
+  python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4 \\
+    --cut-percentage 25 --cut-shape star --piece-scale 1.2 \\
+    --hole-color "#FF00FF" --num-alignments 4 --movement-style rotating \\
+    --fps 60 --duration 20 \\
+    --margin-top 15 --margin-bottom 45 --margin-left 20 --margin-right 20
+        """
+    )
+
+    # Required arguments
+    required = parser.add_argument_group('required arguments')
+    required.add_argument('-i', '--input-image', required=True,
+                          help='Path to input image (puzzle piece source)')
+    required.add_argument('-b', '--background-video', required=True,
+                          help='Path to background video (9:16 format recommended)')
+    required.add_argument('-o', '--output', required=True,
+                          help='Path for output video')
+
+    # Video settings
+    video_group = parser.add_argument_group('video settings')
+    video_group.add_argument('--duration', type=float, default=None,
+                             help='Video duration in seconds (default: use background video duration)')
+    video_group.add_argument('--fps', type=int, default=30,
+                             help='Frames per second (default: 30, range: 1-120)')
+
+    # Piece configuration
+    piece_group = parser.add_argument_group('piece configuration')
+    piece_group.add_argument('--cut-percentage', type=int, default=20,
+                             help='Size of cut piece as %% of image (default: 20, range: 1-50)')
+    piece_group.add_argument('--cut-shape', type=str, default='random',
+                             choices=['circle', 'square', 'triangle', 'star', 'random'],
+                             help='Shape of puzzle piece (default: random)')
+    piece_group.add_argument('--piece-scale', type=float, default=1.0,
+                             help='Size multiplier for piece (default: 1.0, range: 0.5-2.0)')
+
+    # Animation settings
+    anim_group = parser.add_argument_group('animation settings')
+    anim_group.add_argument('--num-alignments', type=int, default=None,
+                            help='Number of perfect alignments (default: random 3-5, range: 1-20)')
+    anim_group.add_argument('--movement-style', type=str, default='chaotic',
+                            choices=['chaotic', 'rotating', 'zigzag'],
+                            help='Movement pattern (default: chaotic)')
+
+    # Visual settings
+    visual_group = parser.add_argument_group('visual settings')
+    visual_group.add_argument('--hole-color', type=str, default='red',
+                              help='Color of hole (default: red, options: red/black/blue/green/yellow/purple/orange/pink/cyan/random or hex like #FF0000)')
+
+    # Cut margins
+    margin_group = parser.add_argument_group('cut margins (percentage of image to avoid)')
+    margin_group.add_argument('--margin-top', type=int, default=10,
+                              help='Top margin %% (default: 10, range: 0-50)')
+    margin_group.add_argument('--margin-bottom', type=int, default=45,
+                              help='Bottom margin %% (default: 45, range: 0-50)')
+    margin_group.add_argument('--margin-left', type=int, default=20,
+                              help='Left margin %% (default: 20, range: 0-50)')
+    margin_group.add_argument('--margin-right', type=int, default=20,
+                              help='Right margin %% (default: 20, range: 0-50)')
+
+    return parser.parse_args()
+
+
+def main():
+    """Main entry point with argument parsing."""
+    args = parse_arguments()
 
     try:
         # Create output directory if it doesn't exist
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
         # Initialize generator
         generator = PuzzleVideoGenerator(
-            input_image=INPUT_IMAGE,
-            background_video=BACKGROUND_VIDEO,
-            output_path=OUTPUT_VIDEO,
-            duration=None,  # Use background video duration
-            fps=30
+            input_image=args.input_image,
+            background_video=args.background_video,
+            output_path=args.output,
+            duration=args.duration,
+            fps=args.fps
         )
 
         # Generate video
         generator.generate_puzzle_video(
-            cut_percentage=40,       # Cut 20% of the scaled image
-            num_alignments=None,     # Random 3-5 alignments
-            cut_shape='random',      # Random shape: circle/square/triangle/star
-            movement_style='chaotic', # Uses linear vertical sweeps
-            hole_color='red',        # Color of hole: 'red', 'black', 'blue', 'green', 'yellow', 'random', or hex
-            piece_scale=0.8,         # Scale multiplier for cut piece size (0.5-2.0)
-            cut_margin_top=20,       # Don't cut from top 10% of image
-            cut_margin_bottom=40,    # Don't cut from bottom 10% of image
-            cut_margin_left=30,      # Don't cut from left 10% of image
-            cut_margin_right=30      # Don't cut from right 10% of image
+            cut_percentage=args.cut_percentage,
+            num_alignments=args.num_alignments,
+            cut_shape=args.cut_shape,
+            movement_style=args.movement_style,
+            hole_color=args.hole_color,
+            piece_scale=args.piece_scale,
+            cut_margin_top=args.margin_top,
+            cut_margin_bottom=args.margin_bottom,
+            cut_margin_left=args.margin_left,
+            cut_margin_right=args.margin_right
         )
 
         print("\n✨ Done! Your puzzle video is ready!")
-        print(f"📁 Location: {OUTPUT_VIDEO}")
-        print("\n💡 Tip: You can adjust parameters:")
-        print("   - num_alignments: Number of alignments (default: random 3-5)")
-        print("   - cut_percentage: Size of cut piece (10-30 recommended)")
-        print("   - cut_shape: 'circle', 'square', 'triangle', 'star', or 'random'")
-        print("   - hole_color: 'red' (default), 'black', 'blue', 'green', 'yellow', 'random', or hex like '#FF0000'")
-        print("   - piece_scale: Multiplier for piece size (0.5-2.0, default: 1.0)")
-        print("   - cut_margin_top/bottom/left/right: Margins % to avoid cutting from (default: 10)")
-        print("   - movement_style: Uses linear vertical sweeps")
+        print(f"📁 Location: {args.output}")
 
     except FileNotFoundError as e:
         print(f"\n❌ Error: {e}")
-        print("   Please check that the input files exist:")
-        print(f"   - Image: {INPUT_IMAGE}")
-        print(f"   - Video: {BACKGROUND_VIDEO}")
+        print("   Please check that the input files exist.")
+        return 1
     except ValueError as e:
         print(f"\n❌ Configuration Error: {e}")
         print("   Please check your parameter values.")
+        return 1
     except RuntimeError as e:
         print(f"\n❌ Processing Error: {e}")
         print("   Please check that FFmpeg is installed and the media files are valid.")
+        return 1
     except Exception as e:
         print(f"\n❌ Unexpected Error: {e}")
         print("   Please report this issue with the error message above.")
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main())
