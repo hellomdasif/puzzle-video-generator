@@ -125,9 +125,13 @@ class PuzzleVideoGenerator:
         if cut_shape not in valid_shapes:
             raise ValueError(f"cut_shape must be one of {valid_shapes}, got: {cut_shape}")
 
-        valid_movement_styles = ['chaotic', 'rotating', 'zigzag']
+        valid_movement_styles = ['chaotic', 'rotating', 'zigzag', 'random']
         if movement_style not in valid_movement_styles:
             raise ValueError(f"movement_style must be one of {valid_movement_styles}, got: {movement_style}")
+
+        # Random movement style if not specified
+        if movement_style == 'random':
+            movement_style = random.choice(['chaotic', 'rotating', 'zigzag'])
 
         if piece_scale < 0.5 or piece_scale > 2.0:
             raise ValueError(f"piece_scale must be between 0.5 and 2.0, got: {piece_scale}")
@@ -172,6 +176,7 @@ class PuzzleVideoGenerator:
         print(f"   Duration: {self.duration}s @ {self.fps}fps")
         print(f"   Alignments: {num_alignments}")
         print(f"   Cut shape: {cut_shape}")
+        print(f"   Movement style: {movement_style}")
         print(f"   Hole color: {hole_color}")
         print(f"   Piece scale: {piece_scale}x")
 
@@ -921,7 +926,7 @@ Examples:
     anim_group.add_argument('--num-alignments', type=int, default=None,
                             help='Number of perfect alignments (default: random 3-5, range: 1-20)')
     anim_group.add_argument('--movement-style', type=str, default='chaotic',
-                            choices=['chaotic', 'rotating', 'zigzag'],
+                            choices=['chaotic', 'rotating', 'zigzag', 'random'],
                             help='Movement pattern (default: chaotic)')
 
     # Visual settings
