@@ -120,7 +120,7 @@ class PuzzleVideoGenerator:
         if num_alignments is not None and (num_alignments < 1 or num_alignments > 20):
             raise ValueError(f"num_alignments must be between 1 and 20, got: {num_alignments}")
 
-        valid_shapes = ['circle', 'square', 'random']
+        valid_shapes = ['circle', 'square', 'diamond', 'hexagon', 'oval', 'random']
         if cut_shape not in valid_shapes:
             raise ValueError(f"cut_shape must be one of {valid_shapes}, got: {cut_shape}")
 
@@ -161,7 +161,7 @@ class PuzzleVideoGenerator:
 
         # Random shape if not specified
         if cut_shape == 'random':
-            cut_shape = random.choice(['circle', 'square'])
+            cut_shape = random.choice(['circle', 'square', 'diamond', 'hexagon', 'oval'])
 
         print(f"🎬 Generating puzzle video...")
         print(f"   Puzzle image: {self.input_image}")
@@ -433,32 +433,11 @@ class PuzzleVideoGenerator:
                        f"a='if(lt(hypot(X-{center_x},Y-{center_y}),{radius}),255,alpha(X,Y))'",
                 output
             ]
-        else:
-            # All polygon shapes - need to generate expression with absolute coordinates
+        elif shape == 'diamond':
+            # Diamond hole
             cx = cut_x + cut_size // 2
             cy = cut_y + cut_size // 2
-
-            if shape == 'triangle':
-                h = cut_size // 2
-                translated_expr = f"gte(Y-{cy},-{h})*lte(Y-{cy},{h})*lte(abs(X-{cx}),(Y-{cy}+{h})*0.577)"
-            elif shape == 'oval':
-                a = cut_size // 2
-                b = cut_size // 2.5
-                translated_expr = f"lte(pow((X-{cx})/{a},2)+pow((Y-{cy})/{b},2),1)"
-            elif shape == 'hexagon':
-                h = cut_size // 2
-                translated_expr = f"lte(abs(X-{cx}),{h}*0.866)*lte(abs((Y-{cy})-tan(PI/6)*(X-{cx})),{h})*lte(abs((Y-{cy})+tan(PI/6)*(X-{cx})),{h})"
-            elif shape == 'pentagon':
-                r = cut_size // 2
-                translated_expr = f"lte(hypot(X-{cx},Y-{cy}),{r}*(1-0.15*abs(sin(5*atan2(Y-{cy},X-{cx})))))"
-            elif shape == 'octagon':
-                r = cut_size // 2
-                translated_expr = f"lte(max(abs(X-{cx}),abs(Y-{cy}))+0.414*min(abs(X-{cx}),abs(Y-{cy})),{r})"
-            elif shape == 'diamond':
-                translated_expr = f"lte(abs(X-{cx})+abs(Y-{cy}),{cut_size//2})"
-            else:
-                translated_expr = f"hypot(X-{cx},Y-{cy})<{cut_size//2}"
-
+            translated_expr = f"lt(abs(X-{cx})+abs(Y-{cy}),{cut_size//2})"
             cmd = [
                 'ffmpeg', '-y', '-i', source_image,
                 '-vf', f"scale={width}:{height},"
@@ -467,6 +446,47 @@ class PuzzleVideoGenerator:
                        f"g='if({translated_expr},{g},g(X,Y))':"
                        f"b='if({translated_expr},{b},b(X,Y))':"
                        f"a='if({translated_expr},255,alpha(X,Y))'",
+                output
+            ]
+        elif shape == 'hexagon':
+            # Hexagon hole
+            cx = cut_x + cut_size // 2
+            cy = cut_y + cut_size // 2
+            rad = cut_size // 2
+            translated_expr = f"lt(max(abs(X-{cx}),abs(Y-{cy}))*1.2+min(abs(X-{cx}),abs(Y-{cy}))*0.4,{rad})"
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={width}:{height},"
+                       f"format=rgba,"
+                       f"geq=r='if({translated_expr},{r},r(X,Y))':"
+                       f"g='if({translated_expr},{g},g(X,Y))':"
+                       f"b='if({translated_expr},{b},b(X,Y))':"
+                       f"a='if({translated_expr},255,alpha(X,Y))'",
+                output
+            ]
+        elif shape == 'oval':
+            # Oval hole
+            cx = cut_x + cut_size // 2
+            cy = cut_y + cut_size // 2
+            rx = cut_size // 2
+            ry = cut_size // 3
+            translated_expr = f"lt(pow((X-{cx})/{rx},2)+pow((Y-{cy})/{ry},2),1)"
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={width}:{height},"
+                       f"format=rgba,"
+                       f"geq=r='if({translated_expr},{r},r(X,Y))':"
+                       f"g='if({translated_expr},{g},g(X,Y))':"
+                       f"b='if({translated_expr},{b},b(X,Y))':"
+                       f"a='if({translated_expr},255,alpha(X,Y))'",
+                output
+            ]
+        else:
+            # Fallback to square
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={width}:{height},"
+                       f"drawbox=x={cut_x}:y={cut_y}:w={cut_size}:h={cut_size}:color={hole_color}:t=fill",
                 output
             ]
 
@@ -498,16 +518,50 @@ class PuzzleVideoGenerator:
                        f"a='if(lt(hypot(X-{radius},Y-{radius}),{radius}),255,0)'",
                 output
             ]
-        else:
-            # All polygon shapes use the geq expression
-            mask_expr = self._get_polygon_mask_expr(shape, cut_size)
+        elif shape == 'diamond':
+            # Diamond/rhombus mask
+            cx, cy = cut_size // 2, cut_size // 2
             cmd = [
                 'ffmpeg', '-y', '-i', source_image,
                 '-vf', f"scale={img_width}:{img_height},"
                        f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y},"
                        f"format=rgba,"
                        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-                       f"a='if({mask_expr},255,0)'",
+                       f"a='if(lt(abs(X-{cx})+abs(Y-{cy}),{cx}),255,0)'",
+                output
+            ]
+        elif shape == 'hexagon':
+            # Hexagon mask (simplified octagon-like)
+            cx, cy = cut_size // 2, cut_size // 2
+            r = cut_size // 2
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={img_width}:{img_height},"
+                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y},"
+                       f"format=rgba,"
+                       f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                       f"a='if(lt(max(abs(X-{cx}),abs(Y-{cy}))*1.2+min(abs(X-{cx}),abs(Y-{cy}))*0.4,{r}),255,0)'",
+                output
+            ]
+        elif shape == 'oval':
+            # Oval/ellipse mask
+            cx, cy = cut_size // 2, cut_size // 2
+            rx, ry = cut_size // 2, cut_size // 3  # Wider than tall
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={img_width}:{img_height},"
+                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y},"
+                       f"format=rgba,"
+                       f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                       f"a='if(lt(pow((X-{cx})/{rx},2)+pow((Y-{cy})/{ry},2),1),255,0)'",
+                output
+            ]
+        else:
+            # Fallback to square
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={img_width}:{img_height},"
+                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y}",
                 output
             ]
 
@@ -1031,7 +1085,7 @@ Examples:
     piece_group.add_argument('--cut-percentage', type=int, default=20,
                              help='Size of cut piece as %% of image (default: 20, range: 1-50)')
     piece_group.add_argument('--cut-shape', type=str, default='random',
-                             choices=['circle', 'square', 'random'],
+                             choices=['circle', 'square', 'diamond', 'hexagon', 'oval', 'random'],
                              help='Shape of puzzle piece (default: random)')
     piece_group.add_argument('--piece-scale', type=float, default=1.0,
                              help='Size multiplier for piece (default: 1.0, range: 0.5-2.0)')
