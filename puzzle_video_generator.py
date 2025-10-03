@@ -114,7 +114,7 @@ class PuzzleVideoGenerator:
             cut_margin_right: Right margin % to avoid cutting from (default: 20)
             audio_volume: Background video audio volume % (default: 100, range: 0-200)
             audio_custom_volume: Custom audio file volume % (default: 100, range: 0-200)
-            alignment_hold_time: Time in seconds to hold piece at aligned position (default: 0.5, range: 0-3)
+            alignment_hold_time: Number of frames to hold piece at aligned position (default: 0.5 for backward compatibility, range: 0-90)
             image_coverage: Percentage of video that image should cover (default: 80, range: 50-95)
         """
         # Validate parameters
@@ -145,8 +145,8 @@ class PuzzleVideoGenerator:
         if audio_custom_volume < 0 or audio_custom_volume > 200:
             raise ValueError(f"audio_custom_volume must be between 0 and 200, got: {audio_custom_volume}")
 
-        if alignment_hold_time < 0 or alignment_hold_time > 3:
-            raise ValueError(f"alignment_hold_time must be between 0 and 3, got: {alignment_hold_time}")
+        if alignment_hold_time < 0 or alignment_hold_time > 90:
+            raise ValueError(f"alignment_hold_time must be between 0 and 90 frames, got: {alignment_hold_time}")
 
         if image_coverage < 50 or image_coverage > 95:
             raise ValueError(f"image_coverage must be between 50 and 95, got: {image_coverage}")
@@ -633,8 +633,8 @@ class PuzzleVideoGenerator:
             # Alignment (if this segment has one)
             if i < num_alignments:
                 alignment_frame = alignment_frames[i]
-                # Hold period: piece stays at alignment
-                hold_frames = max(int(self.fps * alignment_hold_time), 1)  # At least 1 frame
+                # Hold period: piece stays at alignment (alignment_hold_time is now in frames)
+                hold_frames = max(int(alignment_hold_time), 1)  # At least 1 frame
 
                 # Add approach keyframe 5 frames before alignment to slow down
                 approach_frames = 5
@@ -701,7 +701,7 @@ class PuzzleVideoGenerator:
 
             # Alignment (no rotation when aligned)
             alignment_frame = alignment_frames[i]
-            hold_frames = max(int(self.fps * alignment_hold_time), 1)
+            hold_frames = max(int(alignment_hold_time), 1)
 
             # Add approach keyframe to slow down before alignment
             approach_frames = 5
@@ -769,7 +769,7 @@ class PuzzleVideoGenerator:
 
             # Alignment
             alignment_frame = alignment_frames[i]
-            hold_frames = max(int(self.fps * alignment_hold_time), 1)
+            hold_frames = max(int(alignment_hold_time), 1)
 
             # Add approach keyframe to slow down before alignment
             approach_frames = 5
@@ -1007,8 +1007,8 @@ Examples:
     anim_group.add_argument('--movement-style', type=str, default='chaotic',
                             choices=['chaotic', 'rotating', 'zigzag', 'random'],
                             help='Movement pattern (default: chaotic)')
-    anim_group.add_argument('--alignment-hold-time', type=float, default=0.5,
-                            help='Time in seconds to hold piece at aligned position (default: 0.5, range: 0-3)')
+    anim_group.add_argument('--alignment-hold-time', type=int, default=15,
+                            help='Number of frames to hold piece at aligned position (default: 15 frames, range: 0-90)')
 
     # Visual settings
     visual_group = parser.add_argument_group('visual settings')
