@@ -189,6 +189,7 @@ class PuzzleVideoGenerator:
         print(f"   Hole color: {hole_color}")
         print(f"   Piece scale: {piece_scale}x")
         print(f"   Image coverage: {image_coverage}%")
+        print(f"   Alignment hold: {alignment_hold_time} frames")
 
         # Get background video dimensions
         bg_width, bg_height = self._get_video_dimensions()
@@ -636,8 +637,9 @@ class PuzzleVideoGenerator:
                 # Hold period: piece stays at alignment (alignment_hold_time is now in frames)
                 hold_frames = max(int(alignment_hold_time), 1)  # At least 1 frame
 
-                # Add approach keyframe 5 frames before alignment to slow down
-                approach_frames = 5
+                # Add approach keyframe before alignment to slow down (reduced for faster movement)
+                # Use fewer approach frames for short holds
+                approach_frames = min(3, max(1, hold_frames // 3))
                 if alignment_frame > approach_frames:
                     keyframes.append({
                         'frame': alignment_frame - approach_frames,
@@ -704,7 +706,7 @@ class PuzzleVideoGenerator:
             hold_frames = max(int(alignment_hold_time), 1)
 
             # Add approach keyframe to slow down before alignment
-            approach_frames = 5
+            approach_frames = min(3, max(1, hold_frames // 3))
             if alignment_frame > approach_frames:
                 keyframes.append({
                     'frame': alignment_frame - approach_frames,
@@ -772,7 +774,7 @@ class PuzzleVideoGenerator:
             hold_frames = max(int(alignment_hold_time), 1)
 
             # Add approach keyframe to slow down before alignment
-            approach_frames = 5
+            approach_frames = min(3, max(1, hold_frames // 3))
             if alignment_frame > approach_frames:
                 keyframes.append({
                     'frame': alignment_frame - approach_frames,
