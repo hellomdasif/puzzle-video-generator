@@ -4,25 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python-based puzzle video generator that creates challenge videos by overlaying animated puzzle pieces from a source image onto a background video (9:16 format). The core functionality extracts a piece from an input image and animates it moving around over the background video with occasional perfect alignments at the center position.
+This is a Python-based puzzle video generator that creates challenge videos by overlaying animated puzzle pieces from a source image onto a background video (9:16 format). The core functionality extracts a piece from an input image and animates it moving around over the background video with occasional perfect alignments.
 
 ## Dependencies
 
+### Required
 - **FFmpeg**: Required for all image/video processing operations (ffprobe, ffmpeg)
-- **Python 3**: Standard library only (subprocess, random, math, os, pathlib)
+- **Python 3.7+**: Core language
+- **rembg**: Background removal library
+- **Pillow (PIL)**: Image processing library
+
+### Installation
+```bash
+pip3 install rembg pillow
+```
 
 ## Running the Script
 
-Execute directly:
+Execute with command-line arguments:
 ```bash
-python3 puzzle_video_generator.py
+python3 puzzle_video_generator.py -i image.jpg -b video.mp4 -o output.mp4
 ```
 
-The script uses hardcoded paths in `main()`. To use custom images/videos/paths, either:
-1. Modify the constants in `main()` (INPUT_IMAGE, BACKGROUND_VIDEO, OUTPUT_DIR, OUTPUT_VIDEO)
-2. Import and use `PuzzleVideoGenerator` class programmatically
-
-If no background video is found, the script automatically creates a sample 9:16 background video with gradient.
+See README.md for full list of options and examples.
 
 ## Architecture
 
@@ -62,22 +66,30 @@ if(lt(t,t1),v0+((v1-v0)/(t1-t0))*(t-t0), if(lt(t,t2),...))
 
 ## Configuration Parameters
 
-Main generation parameters (`generate_puzzle_video()` method):
-- `cut_percentage`: Size of extracted piece relative to background video (10-30 recommended)
-- `num_alignments`: Number of perfect alignment moments (default: None for random 4-8)
-- `cut_shape`: 'circle', 'square', or 'random'
-- `movement_style`: 'chaotic', 'smooth', or 'rotating'
+### Main Parameters
+- `cut_percentage`: Size of extracted piece relative to image (1-50, default: 20)
+- `num_alignments`: Number of perfect alignments (1-20, default: random 3-5)
+- `cut_shape`: 'circle', 'square', 'diamond', 'hexagon', 'oval', or 'random'
+- `movement_style`: 'chaotic', 'rotating', 'zigzag', or 'random'
+- `piece_scale`: Size multiplier (0.5-2.0, default: 1.0)
+- `margin_top`: Top margin % to avoid cutting from (0-90, default: 10)
+- `image_coverage`: % of video that image covers (50-95, default: 80)
+- `alignment_hold_time`: Frames to hold at alignment (0-90, default: 15)
+- `hole_color`: Color of hole ('red', 'blue', hex like '#FF0000', etc.)
 
-Video parameters (constructor):
-- `input_image`: Path to source image for puzzle piece
+### Video Parameters
+- `input_image`: Path to source image
 - `background_video`: Path to 9:16 background video
-- `duration`: Video length in seconds (default: None, uses background video duration)
-- `fps`: Frames per second (default: 30)
+- `audio_file`: Optional custom audio file
+- `duration`: Video length in seconds (max 12, default: auto from video/audio)
+- `fps`: Frames per second (1-120, default: 30)
 
 ## Temporary Files
 
 The script creates a `temp_frames/` directory (sibling to output video) containing:
-- `cut_piece.png`: The extracted puzzle piece with alpha channel (circular or square mask)
+- `no_bg.png`: Image with background removed
+- `main_image_hole.png`: Main image with colored hole where piece was cut
+- `cut_piece.png`: The extracted puzzle piece with alpha channel and shape mask
 
 This directory is automatically cleaned up after video generation.
 
