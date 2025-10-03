@@ -94,8 +94,7 @@ class PuzzleVideoGenerator:
     def generate_puzzle_video(self, cut_percentage=20, num_alignments=None,
                             cut_shape='random', movement_style='chaotic',
                             hole_color='red', piece_scale=1.0,
-                            cut_margin_top=10, cut_margin_bottom=45,
-                            cut_margin_left=20, cut_margin_right=20,
+                            cut_margin_top=10,
                             audio_volume=100, audio_custom_volume=100,
                             alignment_hold_time=0.5, image_coverage=80):
         """
@@ -108,10 +107,7 @@ class PuzzleVideoGenerator:
             movement_style: Movement style (currently uses linear vertical)
             hole_color: Color of the hole ('red', 'black', 'blue', 'green', 'yellow', 'random', or hex like '#FF0000')
             piece_scale: Scale multiplier for cut piece size (default: 1.0, range: 0.5-2.0)
-            cut_margin_top: Top margin % to avoid cutting from (default: 10)
-            cut_margin_bottom: Bottom margin % to avoid cutting from (default: 45)
-            cut_margin_left: Left margin % to avoid cutting from (default: 20)
-            cut_margin_right: Right margin % to avoid cutting from (default: 20)
+            cut_margin_top: Top margin % to avoid cutting from (default: 10). Cut will be horizontally centered and positioned immediately after the top margin.
             audio_volume: Background video audio volume % (default: 100, range: 0-200)
             audio_custom_volume: Custom audio file volume % (default: 100, range: 0-200)
             alignment_hold_time: Number of frames to hold piece at aligned position (default: 0.5 for backward compatibility, range: 0-90)
@@ -151,21 +147,9 @@ class PuzzleVideoGenerator:
         if image_coverage < 50 or image_coverage > 95:
             raise ValueError(f"image_coverage must be between 50 and 95, got: {image_coverage}")
 
-        # Validate cut margins
-        for margin_name, margin_value in [
-            ('cut_margin_top', cut_margin_top),
-            ('cut_margin_bottom', cut_margin_bottom),
-            ('cut_margin_left', cut_margin_left),
-            ('cut_margin_right', cut_margin_right)
-        ]:
-            if margin_value < 0 or margin_value > 50:
-                raise ValueError(f"{margin_name} must be between 0 and 50, got: {margin_value}")
-
-        # Validate total margins don't exceed 100%
-        if cut_margin_top + cut_margin_bottom >= 100:
-            raise ValueError(f"cut_margin_top + cut_margin_bottom must be < 100, got: {cut_margin_top + cut_margin_bottom}")
-        if cut_margin_left + cut_margin_right >= 100:
-            raise ValueError(f"cut_margin_left + cut_margin_right must be < 100, got: {cut_margin_left + cut_margin_right}")
+        # Validate cut margin
+        if cut_margin_top < 0 or cut_margin_top > 90:
+            raise ValueError(f"cut_margin_top must be between 0 and 90, got: {cut_margin_top}")
 
         # Handle random hole color
         if hole_color == 'random':
@@ -244,24 +228,22 @@ class PuzzleVideoGenerator:
             print(f"   ⚠️  Warning: Cut size is large ({cut_size}px). Reducing to 50% of image.")
             cut_size = min(scaled_img_width, scaled_img_height) // 2
 
-        # Calculate safe zone boundaries based on margin percentages
+        # Calculate safe zone boundary based on margin percentage
         margin_top_px = int(scaled_img_height * (cut_margin_top / 100))
-        margin_bottom_px = int(scaled_img_height * (cut_margin_bottom / 100))
-        margin_left_px = int(scaled_img_width * (cut_margin_left / 100))
-        margin_right_px = int(scaled_img_width * (cut_margin_right / 100))
 
-        # Calculate available area for cutting (excluding margins)
-        available_width = scaled_img_width - margin_left_px - margin_right_px
-        available_height = scaled_img_height - margin_top_px - margin_bottom_px
+        # Calculate available area for cutting (after top margin)
+        available_height = scaled_img_height - margin_top_px
 
         # Ensure we have enough space for the cut
-        if available_width < cut_size or available_height < cut_size:
-            raise ValueError(f"Available area ({available_width}x{available_height}) too small for cut size {cut_size}px. "
-                           f"Reduce cut_percentage, piece_scale, or cut margins.")
+        if scaled_img_width < cut_size or available_height < cut_size:
+            raise ValueError(f"Available area ({scaled_img_width}x{available_height}) too small for cut size {cut_size}px. "
+                           f"Reduce cut_percentage, piece_scale, or cut_margin_top.")
 
-        # Random position for the cut within the safe zone
-        cut_x_on_img = random.randint(margin_left_px, margin_left_px + available_width - cut_size)
-        cut_y_on_img = random.randint(margin_top_px, margin_top_px + available_height - cut_size)
+        # Center the cut horizontally
+        cut_x_on_img = (scaled_img_width - cut_size) // 2
+
+        # Cut starts immediately after margin_top
+        cut_y_on_img = margin_top_px
 
         # Absolute position on background video where the piece should align
         align_x = img_x + cut_x_on_img
@@ -972,7 +954,7 @@ Examples:
     --cut-percentage 25 --cut-shape star --piece-scale 1.2 \\
     --hole-color "#FF00FF" --num-alignments 4 --movement-style rotating \\
     --fps 60 --audio-file audio.mp3 --audio-volume 10 --audio-custom-volume 100 \\
-    --margin-top 15 --margin-bottom 45 --margin-left 20 --margin-right 20
+    --margin-top 20 --image-coverage 75 --alignment-hold-time 20
         """
     )
 
@@ -1028,16 +1010,10 @@ Examples:
     audio_group.add_argument('--audio-custom-volume', type=int, default=100,
                              help='Custom audio file volume %% (default: 100, range: 0-200)')
 
-    # Cut margins
-    margin_group = parser.add_argument_group('cut margins (percentage of image to avoid)')
+    # Cut margin
+    margin_group = parser.add_argument_group('cut margin')
     margin_group.add_argument('--margin-top', type=int, default=10,
-                              help='Top margin %% (default: 10, range: 0-50)')
-    margin_group.add_argument('--margin-bottom', type=int, default=45,
-                              help='Bottom margin %% (default: 45, range: 0-50)')
-    margin_group.add_argument('--margin-left', type=int, default=20,
-                              help='Left margin %% (default: 20, range: 0-50)')
-    margin_group.add_argument('--margin-right', type=int, default=20,
-                              help='Right margin %% (default: 20, range: 0-50)')
+                              help='Top margin %% to avoid cutting from (default: 10, range: 0-90). Cut will be horizontally centered and positioned immediately after the top margin.')
 
     return parser.parse_args()
 
@@ -1071,9 +1047,6 @@ def main():
             hole_color=args.hole_color,
             piece_scale=args.piece_scale,
             cut_margin_top=args.margin_top,
-            cut_margin_bottom=args.margin_bottom,
-            cut_margin_left=args.margin_left,
-            cut_margin_right=args.margin_right,
             audio_volume=args.audio_volume,
             audio_custom_volume=args.audio_custom_volume,
             alignment_hold_time=args.alignment_hold_time,
