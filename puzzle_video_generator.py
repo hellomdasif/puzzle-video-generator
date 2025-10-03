@@ -120,7 +120,7 @@ class PuzzleVideoGenerator:
         if num_alignments is not None and (num_alignments < 1 or num_alignments > 20):
             raise ValueError(f"num_alignments must be between 1 and 20, got: {num_alignments}")
 
-        valid_shapes = ['circle', 'square', 'triangle', 'star', 'random']
+        valid_shapes = ['circle', 'square', 'random']
         if cut_shape not in valid_shapes:
             raise ValueError(f"cut_shape must be one of {valid_shapes}, got: {cut_shape}")
 
@@ -161,7 +161,7 @@ class PuzzleVideoGenerator:
 
         # Random shape if not specified
         if cut_shape == 'random':
-            cut_shape = random.choice(['circle', 'square', 'triangle', 'star'])
+            cut_shape = random.choice(['circle', 'square'])
 
         print(f"🎬 Generating puzzle video...")
         print(f"   Puzzle image: {self.input_image}")
@@ -410,7 +410,16 @@ class PuzzleVideoGenerator:
             r, g, b = color_map.get(hole_color.lower(), (255, 0, 0))  # Default to red
 
         # Scale image (already has background removed) and add hole
-        if shape == 'circle':
+        if shape == 'square':
+            # Square hole using drawbox
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={width}:{height},"
+                       f"drawbox=x={cut_x}:y={cut_y}:w={cut_size}:h={cut_size}:color={hole_color}:t=fill",
+                output
+            ]
+        elif shape == 'circle':
+            # Circle hole using geq
             radius = cut_size // 2
             center_x = cut_x + radius
             center_y = cut_y + radius
@@ -424,27 +433,40 @@ class PuzzleVideoGenerator:
                        f"a='if(lt(hypot(X-{center_x},Y-{center_y}),{radius}),255,alpha(X,Y))'",
                 output
             ]
-        elif shape == 'square':
+        else:
+            # All polygon shapes - need to generate expression with absolute coordinates
+            cx = cut_x + cut_size // 2
+            cy = cut_y + cut_size // 2
+
+            if shape == 'triangle':
+                h = cut_size // 2
+                translated_expr = f"gte(Y-{cy},-{h})*lte(Y-{cy},{h})*lte(abs(X-{cx}),(Y-{cy}+{h})*0.577)"
+            elif shape == 'oval':
+                a = cut_size // 2
+                b = cut_size // 2.5
+                translated_expr = f"lte(pow((X-{cx})/{a},2)+pow((Y-{cy})/{b},2),1)"
+            elif shape == 'hexagon':
+                h = cut_size // 2
+                translated_expr = f"lte(abs(X-{cx}),{h}*0.866)*lte(abs((Y-{cy})-tan(PI/6)*(X-{cx})),{h})*lte(abs((Y-{cy})+tan(PI/6)*(X-{cx})),{h})"
+            elif shape == 'pentagon':
+                r = cut_size // 2
+                translated_expr = f"lte(hypot(X-{cx},Y-{cy}),{r}*(1-0.15*abs(sin(5*atan2(Y-{cy},X-{cx})))))"
+            elif shape == 'octagon':
+                r = cut_size // 2
+                translated_expr = f"lte(max(abs(X-{cx}),abs(Y-{cy}))+0.414*min(abs(X-{cx}),abs(Y-{cy})),{r})"
+            elif shape == 'diamond':
+                translated_expr = f"lte(abs(X-{cx})+abs(Y-{cy}),{cut_size//2})"
+            else:
+                translated_expr = f"hypot(X-{cx},Y-{cy})<{cut_size//2}"
+
             cmd = [
                 'ffmpeg', '-y', '-i', source_image,
                 '-vf', f"scale={width}:{height},"
-                       f"drawbox=x={cut_x}:y={cut_y}:w={cut_size}:h={cut_size}:color={hole_color}:t=fill",
-                output
-            ]
-        elif shape == 'triangle':
-            # Create triangle hole using polygon
-            points = self._get_triangle_points(cut_x, cut_y, cut_size)
-            cmd = [
-                'ffmpeg', '-y', '-i', source_image,
-                '-vf', f"scale={width}:{height},"
-                       f"drawbox=x={cut_x}:y={cut_y}:w={cut_size}:h={cut_size}:color={hole_color}:t=fill",
-                output
-            ]
-        else:  # star
-            cmd = [
-                'ffmpeg', '-y', '-i', source_image,
-                '-vf', f"scale={width}:{height},"
-                       f"drawbox=x={cut_x}:y={cut_y}:w={cut_size}:h={cut_size}:color={hole_color}:t=fill",
+                       f"format=rgba,"
+                       f"geq=r='if({translated_expr},{r},r(X,Y))':"
+                       f"g='if({translated_expr},{g},g(X,Y))':"
+                       f"b='if({translated_expr},{b},b(X,Y))':"
+                       f"a='if({translated_expr},255,alpha(X,Y))'",
                 output
             ]
 
@@ -456,7 +478,16 @@ class PuzzleVideoGenerator:
     def _extract_cut_piece_from_image(self, source_image, cut_x, cut_y, cut_size, img_width, img_height, output, shape):
         """Extract the cut piece from the scaled image (background already removed)."""
 
-        if shape == 'circle':
+        if shape == 'square':
+            # Simple square crop (no mask needed)
+            cmd = [
+                'ffmpeg', '-y', '-i', source_image,
+                '-vf', f"scale={img_width}:{img_height},"
+                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y}",
+                output
+            ]
+        elif shape == 'circle':
+            # Circle mask
             radius = cut_size // 2
             cmd = [
                 'ffmpeg', '-y', '-i', source_image,
@@ -467,26 +498,16 @@ class PuzzleVideoGenerator:
                        f"a='if(lt(hypot(X-{radius},Y-{radius}),{radius}),255,0)'",
                 output
             ]
-        elif shape == 'square':
+        else:
+            # All polygon shapes use the geq expression
+            mask_expr = self._get_polygon_mask_expr(shape, cut_size)
             cmd = [
                 'ffmpeg', '-y', '-i', source_image,
                 '-vf', f"scale={img_width}:{img_height},"
-                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y}",
-                output
-            ]
-        elif shape == 'triangle':
-            # Triangle with alpha mask
-            cmd = [
-                'ffmpeg', '-y', '-i', source_image,
-                '-vf', f"scale={img_width}:{img_height},"
-                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y}",
-                output
-            ]
-        else:  # star
-            cmd = [
-                'ffmpeg', '-y', '-i', source_image,
-                '-vf', f"scale={img_width}:{img_height},"
-                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y}",
+                       f"crop={cut_size}:{cut_size}:{cut_x}:{cut_y},"
+                       f"format=rgba,"
+                       f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                       f"a='if({mask_expr},255,0)'",
                 output
             ]
 
@@ -495,13 +516,44 @@ class PuzzleVideoGenerator:
             print(f"❌ Error extracting cut piece: {result.stderr}")
             raise RuntimeError(f"FFmpeg failed to extract cut piece")
 
-    def _get_triangle_points(self, x, y, size):
-        """Generate triangle points for a given square."""
-        # Equilateral triangle pointing up
-        top = (x + size // 2, y)
-        bottom_left = (x, y + size)
-        bottom_right = (x + size, y + size)
-        return [top, bottom_left, bottom_right]
+    def _get_polygon_mask_expr(self, shape, size):
+        """Generate FFmpeg geq expression for polygon shapes (centered in size x size box)."""
+        cx, cy = size // 2, size // 2  # Center point
+
+        if shape == 'triangle':
+            # Equilateral triangle pointing up
+            # Point is at top, base at bottom
+            h = size // 2  # Half height
+            return f"gte(Y-{cy},-{h})*lte(Y-{cy},{h})*lte(abs(X-{cx}),(Y-{cy}+{h})*0.577)"  # 0.577 = 1/1.732
+
+        elif shape == 'oval':
+            # Ellipse (wider horizontally)
+            a = size // 2  # Horizontal radius
+            b = size // 2.5  # Vertical radius (smaller for oval)
+            return f"lte(pow((X-{cx})/{a},2)+pow((Y-{cy})/{b},2),1)"
+
+        elif shape == 'hexagon':
+            # Regular hexagon
+            h = size // 2
+            return f"lte(abs(X-{cx}),{h}*0.866)*lte(abs((Y-{cy})-tan(PI/6)*(X-{cx})),{h})*lte(abs((Y-{cy})+tan(PI/6)*(X-{cx})),{h})"
+
+        elif shape == 'pentagon':
+            # Regular pentagon (approximate using angle check)
+            r = size // 2
+            return f"lte(hypot(X-{cx},Y-{cy}),{r}*(1-0.15*abs(sin(5*atan2(Y-{cy},X-{cx})))))"
+
+        elif shape == 'octagon':
+            # Regular octagon
+            r = size // 2
+            return f"lte(max(abs(X-{cx}),abs(Y-{cy}))+0.414*min(abs(X-{cx}),abs(Y-{cy})),{r})"
+
+        elif shape == 'diamond':
+            # Diamond/Rhombus
+            return f"lte(abs(X-{cx})+abs(Y-{cy}),{size//2})"
+
+        else:
+            # Fallback to circle
+            return f"hypot(X-{cx},Y-{cy})<{size//2}"
 
     def _generate_alignment_frames(self, num_alignments):
         """Generate frame numbers where the piece should align."""
@@ -979,7 +1031,7 @@ Examples:
     piece_group.add_argument('--cut-percentage', type=int, default=20,
                              help='Size of cut piece as %% of image (default: 20, range: 1-50)')
     piece_group.add_argument('--cut-shape', type=str, default='random',
-                             choices=['circle', 'square', 'triangle', 'star', 'random'],
+                             choices=['circle', 'square', 'random'],
                              help='Shape of puzzle piece (default: random)')
     piece_group.add_argument('--piece-scale', type=float, default=1.0,
                              help='Size multiplier for piece (default: 1.0, range: 0.5-2.0)')
