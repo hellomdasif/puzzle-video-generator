@@ -37,7 +37,7 @@ class PuzzleVideoGenerator:
         self.audio_file = audio_file
         self.fps = fps
 
-        # Get duration: priority is audio file > explicit duration > background video
+        # Get duration: use explicit duration (default 12s from argparse)
         if duration is None:
             if audio_file:
                 self.duration = self._get_audio_duration()
@@ -46,7 +46,12 @@ class PuzzleVideoGenerator:
         else:
             self.duration = duration
 
-        self.total_frames = int(self.duration * fps)
+        # Hard limit to 12 seconds
+        self.duration = min(self.duration, 12)
+
+        # Use ceil to ensure we cover the full duration without gaps
+        import math
+        self.total_frames = math.ceil(self.duration * fps)
 
     def _validate_inputs(self, input_image, background_video, output_path, fps, audio_file):
         """Validate all input parameters."""
@@ -580,10 +585,13 @@ class PuzzleVideoGenerator:
 
             # End frame of this segment
             if i == num_alignments:
-                # Last segment - go to the very end
+                # Last segment - ensure we have a keyframe at the very end
+                # Use both total_frames-1 AND add a bit more to cover full duration
+                mid_frame = start_frame + (self.total_frames - 1 - start_frame) // 2
                 end_frame = self.total_frames - 1
             else:
                 end_frame = (i + 1) * frames_per_segment - 1
+                mid_frame = None
 
             if going_down:
                 start_y = 0
@@ -607,6 +615,16 @@ class PuzzleVideoGenerator:
                     'frame': alignment_frame,
                     'x': origin_x,
                     'y': origin_y,
+                    'rotation': 0
+                })
+
+            # For last segment, add a mid-point keyframe for smoother motion
+            if i == num_alignments and mid_frame:
+                mid_y = start_y + (end_y - start_y) // 2
+                keyframes.append({
+                    'frame': mid_frame,
+                    'x': sweep_x,
+                    'y': mid_y,
                     'rotation': 0
                 })
 
@@ -735,40 +753,42 @@ class PuzzleVideoGenerator:
             # [2] = cut piece
             # [3] = custom audio file
             filter_complex = (
+                # Trim background video to exact duration
+                f"[0:v]trim=duration={self.duration},setpts=PTS-STARTPTS[bg_trimmed];"
                 # Format main image to ensure alpha channel is preserved
                 f"[1:v]format=rgba[main_with_alpha];"
                 # Overlay main image on background (static position)
-                f"[0:v][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
+                f"[bg_trimmed][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
                 # Rotate the cut piece
                 f"[2:v]format=rgba[piece];"
                 f"[piece]rotate='{self._build_interpolation_expr(keyframes, 'rotation')}*PI/180:"
                 f"c=none:ow=max(iw,ih):oh=max(iw,ih)'[rotated];"
                 # Overlay animated piece on top
                 f"[bg_with_img][rotated]overlay=x='{x_expr}':y='{y_expr}':format=auto[out];"
-                # Apply volume to background video audio
-                f"[0:a]volume={bg_volume_multiplier}[bg_audio];"
-                # Apply volume to custom audio file
-                f"[3:a]volume={custom_volume_multiplier}[custom_audio];"
-                # Mix both audio sources with separate volume controls
-                f"[bg_audio][custom_audio]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+                # Trim and apply volume to background video audio
+                f"[0:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={bg_volume_multiplier}[bg_audio];"
+                # Trim and apply volume to custom audio file
+                f"[3:a]atrim=duration={self.duration},asetpts=PTS-STARTPTS,volume={custom_volume_multiplier}[custom_audio];"
+                # Mix both audio sources with exact duration
+                f"[bg_audio][custom_audio]amix=inputs=2:duration=first:dropout_transition=2[aout]"
             )
 
             cmd = [
                 'ffmpeg', '-y',
-                '-i', self.background_video,  # Input 0: background video
+                '-t', str(self.duration), '-i', self.background_video,  # Input 0: background video (trimmed)
                 '-loop', '1', '-t', str(self.duration), '-i', main_image,  # Input 1: main image with hole
                 '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
-                '-i', self.audio_file,  # Input 3: custom audio file
+                '-t', str(self.duration), '-i', self.audio_file,  # Input 3: custom audio file (trimmed)
                 '-filter_complex', filter_complex,
                 '-map', '[out]',  # Map video output
                 '-map', '[aout]',  # Map mixed audio output
                 '-r', str(self.fps),
+                '-t', str(self.duration),  # Force output duration
                 '-pix_fmt', 'yuv420p',
                 '-c:v', 'libx264',
                 '-preset', 'fast',
                 '-c:a', 'aac',  # Encode audio to AAC
                 '-b:a', '192k',  # Audio bitrate
-                '-shortest',  # End when shortest stream ends
                 self.output_path
             ]
         else:
@@ -778,10 +798,12 @@ class PuzzleVideoGenerator:
             # [1] = main image with hole
             # [2] = cut piece
             filter_complex = (
+                # Trim background video to exact duration
+                f"[0:v]trim=duration={self.duration},setpts=PTS-STARTPTS[bg_trimmed];"
                 # Format main image to ensure alpha channel is preserved
                 f"[1:v]format=rgba[main_with_alpha];"
                 # Overlay main image on background (static position)
-                f"[0:v][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
+                f"[bg_trimmed][main_with_alpha]overlay=x={img_x}:y={img_y}:format=auto[bg_with_img];"
                 # Rotate the cut piece
                 f"[2:v]format=rgba[piece];"
                 f"[piece]rotate='{self._build_interpolation_expr(keyframes, 'rotation')}*PI/180:"
@@ -792,17 +814,18 @@ class PuzzleVideoGenerator:
 
             cmd = [
                 'ffmpeg', '-y',
-                '-i', self.background_video,  # Input 0: background video
+                '-t', str(self.duration), '-i', self.background_video,  # Input 0: background video (trimmed)
                 '-loop', '1', '-t', str(self.duration), '-i', main_image,  # Input 1: main image with hole
                 '-loop', '1', '-t', str(self.duration), '-i', cut_piece,   # Input 2: cut piece
                 '-filter_complex', filter_complex,
                 '-map', '[out]',
                 '-map', '0:a?',  # Map audio from background video if present (0:a? means optional)
                 '-r', str(self.fps),
+                '-t', str(self.duration),  # Force output duration
                 '-pix_fmt', 'yuv420p',
                 '-c:v', 'libx264',
                 '-preset', 'fast',
-                '-af', f'volume={bg_volume_multiplier}',  # Apply volume filter
+                '-af', f'atrim=duration={self.duration},volume={bg_volume_multiplier}',  # Trim and apply volume filter
                 '-c:a', 'aac',  # Encode audio to AAC
                 '-b:a', '192k',  # Audio bitrate
                 self.output_path
@@ -831,7 +854,9 @@ class PuzzleVideoGenerator:
             if i == 0:
                 expr_parts.append(f"if(lt(t,{t2}),{v1}+(({v2}-{v1})/({t2}-{t1}))*(t-{t1}),")
             elif i == len(keyframes) - 2:
-                expr_parts.append(f"if(lt(t,{t2}),{v1}+(({v2}-{v1})/({t2}-{t1}))*(t-{t1}),{v2})")
+                # For the last segment, continue interpolation beyond t2 to fill remaining time
+                # This ensures movement continues until the very end of the video
+                expr_parts.append(f"{v1}+(({v2}-{v1})/({t2}-{t1}))*(t-{t1})")
             else:
                 expr_parts.append(f"if(lt(t,{t2}),{v1}+(({v2}-{v1})/({t2}-{t1}))*(t-{t1}),")
 
@@ -876,8 +901,8 @@ Examples:
 
     # Video settings
     video_group = parser.add_argument_group('video settings')
-    video_group.add_argument('--duration', type=float, default=None,
-                             help='Video duration in seconds (default: use background video duration)')
+    video_group.add_argument('--duration', type=float, default=12,
+                             help='Video duration in seconds (default: 12)')
     video_group.add_argument('--fps', type=int, default=30,
                              help='Frames per second (default: 30, range: 1-120)')
 
